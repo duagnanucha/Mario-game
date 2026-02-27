@@ -69,11 +69,19 @@ const C = {
   qBlockHit:  '#8b6914',
   goomba:     '#a05000',
   goombaDark: '#6b3300',
-  flagGreen:  '#00a800',
-  mushRed:    '#e52521',
-  cloud:      '#ffffff',
-  mountain:   '#00a800',
-  bush:       '#00a800',
+  flagGreen:    '#00a800',
+  mushRed:      '#e52521',
+  cloud:        '#ffffff',
+  mountain:     '#00a800',
+  bush:         '#00a800',
+  titanBody:    '#4a3060',
+  titanArmor:   '#7b5ea7',
+  titanHigh:    '#c0a0ff',
+  titanEye:     '#ff2020',
+  titanBoulder: '#888',
+  titanBoulderD:'#555',
+  titanHpBar:   '#e52521',
+  titanHpBg:    '#400',
 };
 
 // ─── Particle System ─────────────────────────
@@ -160,8 +168,12 @@ function sfxCoin()   { playTone(988, 'square', 0.08); setTimeout(() => playTone(
 function sfxStomp()  { playTone(200, 'square', 0.1, 0.2); }
 function sfxBreak()  { [200,150,100].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.08,0.15), i*40)); }
 function sfxPower()  { [330,392,523,659].forEach((f,i) => setTimeout(() => playTone(f,'square',0.1,0.12), i*80)); }
-function sfxDie()    { [440,330,220,110].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.15,0.2), i*100)); }
-function sfxWin()    { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f,'square',0.2,0.15), i*150)); }
+function sfxDie()        { [440,330,220,110].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.15,0.2), i*100)); }
+function sfxWin()        { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f,'square',0.2,0.15), i*150)); }
+function sfxTitanRoar()  { [80,60,100,70].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.25,0.3), i*80)); }
+function sfxTitanHit()   { [300,200,150].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.2,0.25), i*60)); }
+function sfxTitanDie()   { [200,150,100,80,60].forEach((f,i) => setTimeout(() => playTone(f,'sawtooth',0.3,0.3), i*120)); }
+function sfxBoulder()    { playTone(120, 'sawtooth', 0.18, 0.2); }
 
 // ─── Level Builder ───────────────────────────
 // Tile types: G=ground, B=brick, Q=question, P=pipe_bot, p=pipe_top, F=flagpole base
@@ -179,6 +191,8 @@ function buildLevel() {
     powerups: [],
     flag: null,
     decorations: [],
+    titan: null,
+    boulders: [],
   };
 
   // Ground row (y = H - TILE, full width with gaps)
@@ -368,6 +382,34 @@ function buildLevel() {
     flagY: 0,        // offset from top of pole
     sliding: false,
     slideSpeed: 3,
+  };
+
+  // ── TITAN BOSS ──
+  // Placed at x=5400, before the flag at x=5760
+  // 3x3 tile size: 96x96
+  level.titan = {
+    x: 5400,
+    y: groundY - TILE * 3,      // 96px tall
+    w: TILE * 3,                 // 96px wide
+    h: TILE * 3,
+    vx: -0.9,
+    vy: 0,
+    onGround: false,
+    hp: 3,
+    maxHp: 3,
+    alive: true,
+    phase: 1,                    // 1=patrol 2=faster 3=rage
+    invincible: 0,               // stomp cooldown frames
+    attackTick: 180,             // countdown to next boulder throw (start with delay)
+    attackInterval: 180,         // frames between attacks
+    chargeTick: 300,             // countdown to charge (start with delay)
+    chargeInterval: 300,
+    charging: false,
+    chargeDuration: 0,
+    roarTick: 0,                 // visual roar effect timer
+    deathTimer: 0,               // death animation
+    animTick: 0,
+    facing: -1,                  // -1=left, 1=right
   };
 
   // ── Decorations (clouds, mountains, bushes) ──
@@ -673,6 +715,386 @@ function checkGroundAhead(e, dir, solids) {
   );
 }
 
+// ─── Titan Boss Update ────────────────────────
+function updateTitan() {
+  const t = level.titan;
+  if (!t || !t.alive) {
+    if (t && t.deathTimer > 0) {
+      t.deathTimer--;
+      if (t.deathTimer % 8 === 0) {
+        spawnParticles(t.x + t.w/2 + (Math.random()-0.5)*t.w, t.y + t.h/2, C.titanArmor, 10);
+        spawnParticles(t.x + t.w/2, t.y + (Math.random())*t.h, C.titanHigh, 8);
+      }
+      if (t.deathTimer === 0) triggerWin();
+    }
+    return;
+  }
+
+  const solids = getAllSolids();
+  t.animTick++;
+
+  // Invincibility cooldown
+  if (t.invincible > 0) t.invincible--;
+
+  // Phase progression
+  if (t.hp === 2 && t.phase < 2) {
+    t.phase = 2;
+    t.attackInterval = 120;
+    t.chargeInterval = 200;
+    t.roarTick = 60;
+    sfxTitanRoar();
+    spawnFloat(t.x + t.w/2, t.y - 20, 'TITAN PHASE 2!', '#f80');
+  }
+  if (t.hp === 1 && t.phase < 3) {
+    t.phase = 3;
+    t.attackInterval = 80;
+    t.chargeInterval = 140;
+    t.roarTick = 80;
+    sfxTitanRoar();
+    spawnFloat(t.x + t.w/2, t.y - 20, 'TITAN RAGE!', '#f00');
+  }
+  if (t.roarTick > 0) t.roarTick--;
+
+  // Gravity
+  t.vy += GRAVITY * 0.7;
+  if (t.vy > MAX_FALL) t.vy = MAX_FALL;
+
+  // Charge attack
+  t.chargeTick--;
+  if (t.chargeTick <= 0 && !t.charging) {
+    t.charging = true;
+    t.chargeDuration = 45 + t.phase * 15;
+    t.chargeTick = t.chargeInterval;
+    t.vx = (mario.x > t.x ? 1 : -1) * (4 + t.phase);
+    t.facing = t.vx > 0 ? 1 : -1;
+    sfxTitanRoar();
+    spawnFloat(t.x + t.w/2, t.y - 10, 'CHARGE!', '#f80');
+  }
+  if (t.charging) {
+    t.chargeDuration--;
+    if (t.chargeDuration <= 0) {
+      t.charging = false;
+      t.vx = (t.facing) * (0.9 + t.phase * 0.3);
+    }
+  } else if (!t.charging) {
+    // Normal patrol walk
+    const baseSpd = 0.9 + (t.phase - 1) * 0.5;
+    if (t.onGround) {
+      const dirToMario = mario.x > t.x ? 1 : -1;
+      t.vx += dirToMario * 0.15;
+      if (Math.abs(t.vx) > baseSpd) t.vx = Math.sign(t.vx) * baseSpd;
+    }
+    t.facing = t.vx >= 0 ? 1 : -1;
+  }
+
+  // Boulder throw
+  t.attackTick--;
+  if (t.attackTick <= 0 && t.onGround) {
+    t.attackTick = t.attackInterval;
+    throwBoulder(t);
+  }
+
+  // Wall reversal
+  if (t.x <= 0) { t.vx = Math.abs(t.vx); t.facing = 1; }
+  if (t.x + t.w >= level.width) { t.vx = -Math.abs(t.vx); t.facing = -1; }
+
+  resolveCollisions(t, solids);
+
+  // Mario collision
+  if (!mario.dead && mario.invincible === 0 && rectOverlap(mario, t)) {
+    const mBottom = mario.y + mario.h;
+    const tTop    = t.y + 8; // small tolerance
+    if (mario.vy > 0 && mBottom < tTop + 20 && t.invincible === 0) {
+      // Stomp on head!
+      t.hp--;
+      t.invincible = 60;
+      mario.vy = -10;
+      sfxTitanHit();
+      spawnParticles(t.x + t.w/2, t.y + 10, C.titanHigh, 14);
+      if (t.hp <= 0) {
+        t.alive = false;
+        t.deathTimer = 90;
+        sfxTitanDie();
+        addScore(5000);
+        spawnFloat(t.x + t.w/2, t.y - 30, '+5000', '#ff0');
+        spawnParticles(t.x + t.w/2, t.y + t.h/2, C.titanArmor, 30);
+      } else {
+        addScore(500);
+        spawnFloat(t.x + t.w/2, t.y - 20, `HIT! HP:${t.hp}`, '#f0f');
+      }
+    } else if (t.invincible === 0) {
+      if (mario.state === 'star') {
+        // Star stuns titan briefly
+        t.invincible = 90;
+        t.vx *= -1;
+        t.facing *= -1;
+        sfxTitanHit();
+        spawnFloat(t.x + t.w/2, t.y - 20, 'STUNNED!', '#ff0');
+        spawnParticles(t.x + t.w/2, t.y + t.h/2, '#ff0', 10);
+      } else {
+        killMario();
+      }
+    }
+  }
+}
+
+function throwBoulder(t) {
+  sfxBoulder();
+  const dir = mario.x > t.x ? 1 : -1;
+  level.boulders.push({
+    x: t.x + (dir > 0 ? t.w : 0),
+    y: t.y + t.h - TILE,
+    w: TILE, h: TILE,
+    vx: dir * (3 + t.phase * 1.2),
+    vy: -5,
+    onGround: false,
+    rolling: false,
+    alive: true,
+    spin: 0,
+  });
+  spawnFloat(t.x + t.w/2, t.y - 10, 'BOULDER!', '#aaa');
+}
+
+function updateBoulders() {
+  const solids = getAllSolids();
+  for (let i = level.boulders.length - 1; i >= 0; i--) {
+    const b = level.boulders[i];
+    if (!b.alive) { level.boulders.splice(i, 1); continue; }
+
+    b.vy += GRAVITY;
+    if (b.vy > MAX_FALL) b.vy = MAX_FALL;
+    resolveCollisions(b, solids);
+    if (b.onGround) b.rolling = true;
+    b.spin += b.vx * 0.05;
+
+    // Off screen
+    if (b.x < cameraX - 200 || b.x > cameraX + W + 200 || b.y > H + 100) {
+      b.alive = false;
+      continue;
+    }
+
+    // Mario collision
+    if (!mario.dead && mario.invincible === 0 && rectOverlap(mario, b)) {
+      if (mario.state === 'star') {
+        b.alive = false;
+        spawnParticles(b.x + b.w/2, b.y + b.h/2, C.titanBoulder, 6);
+      } else {
+        killMario();
+      }
+    }
+  }
+}
+
+// ─── Draw Titan ───────────────────────────────
+function drawTitan() {
+  const t = level.titan;
+  if (!t) return;
+  if (!t.alive && t.deathTimer <= 0) return;
+
+  const dx = t.x - cameraX;
+  if (dx < -t.w * 2 || dx > W + t.w) return;
+
+  const dy = t.y;
+  const tw = t.w;   // 96
+  const th = t.h;   // 96
+  const cx = dx + tw / 2;
+
+  ctx.save();
+
+  // Blink white when taking damage
+  if (t.invincible > 0 && t.invincible % 6 < 3 && t.alive) {
+    ctx.filter = 'brightness(3)';
+  }
+
+  // Rage glow
+  if (t.phase === 3 && t.alive) {
+    ctx.shadowColor = '#f00';
+    ctx.shadowBlur = 18 + Math.sin(Date.now() / 100) * 8;
+  }
+
+  // Roar shockwave ring
+  if (t.roarTick > 0) {
+    const progress = 1 - t.roarTick / 80;
+    ctx.strokeStyle = `rgba(255,180,0,${1 - progress})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, dy + th/2, progress * 120, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // Flip facing
+  if (t.facing === 1) {
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-cx, 0);
+  }
+
+  // ── Legs ──
+  const legSwing = t.onGround && Math.abs(t.vx) > 0.3 ? Math.sin(t.animTick * 0.25) * 10 : 0;
+  ctx.fillStyle = C.titanBody;
+  // Left leg
+  ctx.fillRect(dx + 10, dy + th - 28, 22, 28);
+  ctx.fillRect(dx + 6,  dy + th - 12 + legSwing, 26, 12);
+  // Right leg
+  ctx.fillRect(dx + tw - 32, dy + th - 28, 22, 28);
+  ctx.fillRect(dx + tw - 32, dy + th - 12 - legSwing, 26, 12);
+
+  // ── Body armor ──
+  ctx.fillStyle = C.titanBody;
+  ctx.fillRect(dx + 6, dy + 30, tw - 12, th - 56);
+  // Chest plate
+  ctx.fillStyle = C.titanArmor;
+  ctx.fillRect(dx + 14, dy + 36, tw - 28, th - 68);
+  // Armor ridges
+  ctx.fillStyle = C.titanHigh;
+  ctx.fillRect(dx + 16, dy + 38, 8, th - 72);
+  ctx.fillRect(dx + tw - 24, dy + 38, 8, th - 72);
+  ctx.fillRect(dx + 14, dy + 38, tw - 28, 5);
+  ctx.fillRect(dx + 14, dy + 38 + (th - 72)/2, tw - 28, 4);
+
+  // ── Shoulders / pauldrons ──
+  ctx.fillStyle = C.titanArmor;
+  ctx.beginPath();
+  ctx.ellipse(dx + 8,       dy + 34, 14, 12, -0.3, 0, Math.PI*2);
+  ctx.ellipse(dx + tw - 8,  dy + 34, 14, 12,  0.3, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = C.titanHigh;
+  ctx.beginPath();
+  ctx.ellipse(dx + 8,       dy + 30, 8, 6, -0.3, 0, Math.PI*2);
+  ctx.ellipse(dx + tw - 8,  dy + 30, 8, 6,  0.3, 0, Math.PI*2);
+  ctx.fill();
+
+  // ── Arms ──
+  const armSwing = Math.sin(t.animTick * 0.2) * 8;
+  ctx.fillStyle = C.titanBody;
+  ctx.fillRect(dx - 4,       dy + 34 + armSwing, 14, 36);  // left arm
+  ctx.fillRect(dx + tw - 10, dy + 34 - armSwing, 14, 36);  // right arm
+  // Gauntlets (fists)
+  ctx.fillStyle = C.titanArmor;
+  ctx.fillRect(dx - 8,       dy + 66 + armSwing, 20, 18);
+  ctx.fillRect(dx + tw - 12, dy + 66 - armSwing, 20, 18);
+  // Spikes on gauntlets
+  ctx.fillStyle = C.titanHigh;
+  for (let s = 0; s < 3; s++) {
+    ctx.fillRect(dx - 6 + s * 6,       dy + 62 + armSwing, 4, 6);
+    ctx.fillRect(dx + tw - 10 + s * 6, dy + 62 - armSwing, 4, 6);
+  }
+
+  // ── Head ──
+  ctx.fillStyle = C.titanBody;
+  ctx.fillRect(dx + 16, dy, tw - 32, 34);
+  // Helmet
+  ctx.fillStyle = C.titanArmor;
+  ctx.fillRect(dx + 12, dy + 2, tw - 24, 22);
+  ctx.fillRect(dx + 8,  dy + 8, tw - 16, 16);
+  // Helmet crest / mohawk
+  ctx.fillStyle = C.titanHigh;
+  ctx.fillRect(dx + tw/2 - 5, dy - 10, 10, 14);
+  ctx.fillRect(dx + tw/2 - 3, dy - 16, 6, 8);
+  // Horn spikes
+  ctx.fillStyle = '#d4a800';
+  ctx.beginPath();
+  ctx.moveTo(dx + 14, dy + 6);
+  ctx.lineTo(dx + 4,  dy - 10);
+  ctx.lineTo(dx + 22, dy + 6);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(dx + tw - 14, dy + 6);
+  ctx.lineTo(dx + tw - 4,  dy - 10);
+  ctx.lineTo(dx + tw - 22, dy + 6);
+  ctx.fill();
+  // Visor / eyes
+  ctx.fillStyle = '#111';
+  ctx.fillRect(dx + 14, dy + 14, tw - 28, 10);
+  // Glowing eyes
+  const eyeGlow = t.phase === 3 ? `hsl(${(Date.now()/30)%360},100%,60%)` : C.titanEye;
+  ctx.fillStyle = eyeGlow;
+  ctx.beginPath();
+  ctx.ellipse(dx + 26, dy + 19, 6, 4, 0, 0, Math.PI*2);
+  ctx.ellipse(dx + tw - 26, dy + 19, 6, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Eye glow effect
+  ctx.shadowColor = eyeGlow;
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Name plate (only visible on screen first time)
+  if (!t._nameShown) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(dx + 4, dy - 28, tw - 8, 18);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('TITAN', cx, dy - 14);
+    ctx.textAlign = 'left';
+  }
+
+  ctx.restore();
+
+  // HP Bar above Titan
+  if (t.alive) drawTitanHPBar(t, dx, dy, tw);
+}
+
+function drawTitanHPBar(t, dx, dy, tw) {
+  const barW = tw + 20;
+  const barH = 8;
+  const bx = dx - 10;
+  const by = dy - 46;
+  // Background
+  ctx.fillStyle = C.titanHpBg;
+  ctx.fillRect(bx, by, barW, barH);
+  // HP fill
+  const fillW = (t.hp / t.maxHp) * barW;
+  const hpColor = t.phase === 3 ? '#f00' : t.phase === 2 ? '#f80' : C.titanHpBar;
+  ctx.fillStyle = hpColor;
+  ctx.fillRect(bx, by, fillW, barH);
+  // Border
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(bx, by, barW, barH);
+  ctx.lineWidth = 1;
+  // Label
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('TITAN', bx + barW/2, by - 4);
+  ctx.textAlign = 'left';
+}
+
+function drawBoulders() {
+  level.boulders.forEach(b => {
+    if (!b.alive) return;
+    const dx = b.x - cameraX;
+    if (dx < -TILE || dx > W + TILE) return;
+
+    ctx.save();
+    ctx.translate(dx + b.w/2, b.y + b.h/2);
+    ctx.rotate(b.spin);
+    // Boulder body
+    ctx.fillStyle = C.titanBoulder;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.w/2, 0, Math.PI*2);
+    ctx.fill();
+    // Rock texture
+    ctx.fillStyle = C.titanBoulderD;
+    ctx.beginPath();
+    ctx.arc(-4, -4, 6, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(6, 3, 5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.w/2, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.restore();
+  });
+}
+
 // ─── Powerup Update ───────────────────────────
 function updatePowerups() {
   const solids = getAllSolids();
@@ -749,9 +1171,15 @@ let winTimer = 0;
 function triggerWin() {
   if (state === 'win') return;
   state = 'win';
-  winTimer = 180;
+  winTimer = 200;
   sfxWin();
   addScore(timer * 50);
+  // Check if titan was defeated for bonus
+  const t = level.titan;
+  if (t && !t.alive) {
+    addScore(10000);
+    spawnFloat(mario.x + mario.w/2, mario.y - 40, 'TITAN BONUS +10000!', '#ff0');
+  }
   spawnFloat(mario.x + mario.w/2, mario.y - 20, 'GOAL!', '#ff0');
   spawnParticles(mario.x + mario.w/2, mario.y, C.coin, 20);
 }
@@ -1161,6 +1589,10 @@ function draw() {
   // Enemies
   level.enemies.forEach(e => drawEnemy(e));
 
+  // Titan Boss
+  drawTitan();
+  drawBoulders();
+
   // Flag
   drawFlag();
 
@@ -1182,6 +1614,8 @@ function loop(ts) {
     updateTimer();
     updateMario(dt);
     updateEnemies();
+    updateTitan();
+    updateBoulders();
     updatePowerups();
     updateCoins();
     updateQBlocks();
@@ -1190,6 +1624,8 @@ function loop(ts) {
     updateCamera();
     draw();
   } else if (state === 'win') {
+    updateTitan();
+    updateBoulders();
     updateWin();
     updateParticles();
     updateFloats();
