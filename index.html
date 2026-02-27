@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Super Mario</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <div id="hud">
+      <div class="hud-section">
+        <span class="hud-label">MARIO</span>
+        <span id="score">000000</span>
+      </div>
+      <div class="hud-section">
+        <span class="hud-label">&#9733;</span>
+        <span id="coins">00</span>
+      </div>
+      <div class="hud-section">
+        <span class="hud-label">WORLD</span>
+        <span id="world">1-1</span>
+      </div>
+      <div class="hud-section">
+        <span class="hud-label">TIME</span>
+        <span id="time">400</span>
+      </div>
+      <div class="hud-section">
+        <span class="hud-label">LIVES</span>
+        <span id="lives">3</span>
+      </div>
+    </div>
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+    <div id="overlay" class="hidden">
+      <div id="overlay-content">
+        <h1 id="overlay-title">SUPER MARIO</h1>
+        <p id="overlay-msg">Press ENTER or tap to Start</p>
+        <div id="controls-info">
+          <p>&#8592; &#8594; Move &nbsp; | &nbsp; Z / Space / Up Arrow = Jump</p>
+          <p>Shift = Run &nbsp; | &nbsp; P = Pause</p>
+        </div>
+      </div>
+    </div>
+    <div id="mobile-controls">
+      <button class="mobile-btn" id="btn-left">&#9664;</button>
+      <button class="mobile-btn" id="btn-jump">A</button>
+      <button class="mobile-btn" id="btn-right">&#9654;</button>
+    </div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
